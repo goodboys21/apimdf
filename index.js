@@ -1,61 +1,53 @@
-const express = require('express');
-const axios = require('axios');
-const FormData = require('form-data');
-require('dotenv').config();
+const express = require("express");
+const multer = require("multer");
+const axios = require("axios");
+const FormData = require("form-data");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const SESSION = process.env.MEDIAFIRE_SESSION_TOKEN;
+const upload = multer();
 
-app.use(express.json({ limit: '100mb' }));
+const sessionToken = "1d8430531515645a37db428dc6af50c03e2dd1471a87eee31d4dafecc4112d6729ccd6aad45ea64f967e0139d2633a162f8ea83c94f24a76c0855977a4f5a25bcbdef27ab18e2623";
 
-app.post('/tools/mdfupbase', async (req, res) => {
-  const { apikey, filename, buffer } = req.body;
-
-  if (apikey !== 'bagus') {
-    return res.status(403).json({ success: false, message: 'API key salah' });
+app.post("/tools/mdfup", upload.single("file"), async (req, res) => {
+  const apikey = req.query.apikey;
+  if (apikey !== "bagus") {
+    return res.status(403).json({ success: false, message: "API key salah!" });
   }
 
-  if (!filename || !buffer) {
-    return res.status(400).json({ success: false, message: 'Missing filename or buffer' });
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "File tidak ditemukan!" });
   }
 
   try {
-    const fileBuffer = Buffer.from(buffer, 'base64');
-
     const form = new FormData();
-    form.append('file', fileBuffer, filename);
+    form.append("file", req.file.buffer, req.file.originalname);
 
-    await axios.post(
-      `https://www.mediafire.com/api/1.5/upload/simple.php?session_token=${SESSION}`,
+    const response = await axios.post(
+      `https://www.mediafire.com/api/1.5/upload/simple.php?session_token=${sessionToken}`,
       form,
       { headers: form.getHeaders() }
     );
 
-    const { data } = await axios.post(
-      'https://www.mediafire.com/api/1.5/folder/get_content.php',
-      null,
-      {
-        params: {
-          session_token: SESSION,
-          folder_key: 'myfiles',
-          content_type: 'files',
-          response_format: 'json',
-        },
-      }
-    );
+    const xml = response.data;
+    const match = xml.match(/<key>(.*?)<\/key>/);
 
-    const last = data?.response?.folder_content?.files?.[0];
-    if (!last?.links?.normal_download) {
-      return res.json({ success: false, message: 'Gagal ambil link download' });
+    if (!match) {
+      return res.status(500).json({ success: false, message: "Gagal mendapatkan key upload." });
     }
 
-    return res.json({ success: true, url: last.links.normal_download });
+    const key = match[1];
+    const finalUrl = `https://www.mediafire.com/file/${key}/file`;
+
+    return res.json({ success: true, url: finalUrl });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Internal error', error: err.message });
+    return res.status(500).json({ success: false, message: "Gagal upload ke MediaFire.", error: err.message });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server jalan di port ${PORT}`);
+app.get("/", (_, res) => {
+  res.send("✅ Endpoint aktif: POST /tools/mdfup");
+});
+
+app.listen(3000, () => {
+  console.log("Server ready on port 3000");
 });
